@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#f2ede6">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="light-content">
+<meta name="apple-mobile-web-app-title" content="Архив">
+<link rel="manifest" href="/manifest.json">
+<title>Архив</title>
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+:root { --milk:#f2ede6; --ink:#2a2420; }
+
+html, body {
+  width:100%; height:100%; overflow:hidden;
+  background: var(--milk);
+  font-family: 'Palatino Linotype','Book Antiqua',Palatino,Georgia,serif;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+/* subtle paper grain */
+body::after {
+  content:''; position:fixed; inset:0; z-index:9999; pointer-events:none;
+  opacity:.14;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size:180px; mix-blend-mode:multiply;
+}
+
+#canvas { position:fixed; inset:0; overflow:hidden; }
+
+/* ══ EMBOSSED BUTTON WITH LOGO ══════════════════════════ */
+#add-btn {
+  position: fixed;
+  top: 32px; left: 50%;
+  transform: translateX(-50%);
+  width: 76px; height: 76px;
+  border-radius: 50%;
+  border: none; cursor: pointer; z-index: 300;
+  background: linear-gradient(150deg, #fbf7f1 0%, #e5dfd7 100%);
+  box-shadow:
+    6px 6px 14px rgba(0,0,0,0.15),
+    -5px -5px 12px rgba(255,255,255,0.92),
+    inset 0 1.5px 0 rgba(255,255,255,0.7),
+    inset 0 -1px 0 rgba(0,0,0,0.04);
+  display: flex; align-items: center; justify-content: center;
+  transition: box-shadow .16s ease, transform .16s cubic-bezier(.34,1.5,.64,1);
+}
+#add-btn:active {
+  transform: translateX(-50%) scale(.90);
+  box-shadow:
+    2px 2px 6px rgba(0,0,0,0.18),
+    -1px -1px 4px rgba(255,255,255,0.8),
+    inset 3px 3px 9px rgba(0,0,0,0.09),
+    inset -1px -1px 4px rgba(255,255,255,0.6);
+}
+#add-btn svg {
+  width: 46px; height: 46px;
+  pointer-events: none;
+  transition: transform .16s;
+}
+#add-btn:active svg { transform: scale(.88); }
+
+/* ══ SWIPE HINT ══════════════════════════════════════════ */
+#hint {
+  position: fixed;
+  bottom: 32px; left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Courier New', monospace;
+  font-size: 9px; letter-spacing: 2.5px;
+  color: rgba(42,36,32,0.18);
+  pointer-events: none; z-index: 100;
+  white-space: nowrap;
+  transition: opacity .8s;
+}
+#hint::before {
+  content: '↑';
+  display: block; text-align: center;
+  font-size: 14px; margin-bottom: 4px;
+  opacity: .5;
+  animation: bob 2.4s ease-in-out infinite;
+}
+@keyframes bob {
+  0%,100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+
+/* ══ MEMORY BLOCKS ═══════════════════════════════════════ */
+.block {
+  position: absolute;
+  border-radius: 7px;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow:
+    0 2px 10px rgba(0,0,0,0.10),
+    0 1px 2px rgba(0,0,0,0.06),
+    inset 0 1px 0 rgba(255,255,255,0.6);
+  will-change: transform;
+}
+/* paper texture on each block */
+.block::before {
+  content:''; position:absolute; inset:0; z-index:1;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 80 80' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  background-size: 60px; mix-blend-mode: multiply; opacity:.09;
+  pointer-events: none; border-radius: inherit;
+}
+
+/* pulse on tap — no open */
+@keyframes pulse {
+  0%   { transform: scale(1);    box-shadow: 0 2px 10px rgba(0,0,0,.10), inset 0 1px 0 rgba(255,255,255,.6); }
+  35%  { transform: scale(1.08); box-shadow: 0 6px 22px rgba(0,0,0,.16), inset 0 1px 0 rgba(255,255,255,.6); }
+  65%  { transform: scale(.97);  box-shadow: 0 1px 6px rgba(0,0,0,.10),  inset 0 1px 0 rgba(255,255,255,.6); }
+  100% { transform: scale(1);    box-shadow: 0 2px 10px rgba(0,0,0,.10), inset 0 1px 0 rgba(255,255,255,.6); }
+}
+.block.pulsing { animation: pulse .5s cubic-bezier(.34,1.3,.64,1) forwards; }
+
+/* ══ YEAR BLOCK ══════════════════════════════════════════ */
+.year-block {
+  position: absolute; border-radius: 8px; cursor: pointer; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 3px;
+  box-shadow:
+    0 4px 20px rgba(0,0,0,.13), 0 1px 4px rgba(0,0,0,.07),
+    inset 0 1px 0 rgba(255,255,255,.45);
+  transition: transform .2s cubic-bezier(.34,1.2,.64,1);
+}
+.year-block::before {
+  content:''; position:absolute; inset:0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 80 80' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  background-size:60px; mix-blend-mode:multiply; opacity:.08; pointer-events:none;
+}
+.year-block:active { transform:scale(.97); }
+.year-block .yl {
+  font-family:'Courier New',monospace; font-size:8px; letter-spacing:3px;
+  color:rgba(42,36,32,.42); text-transform:uppercase; position:relative; z-index:1;
+}
+.year-block .yn {
+  font-size:28px; font-weight:400; color:rgba(42,36,32,.70); line-height:1;
+  position:relative; z-index:1;
+}
+
+/* ══ INPUT BOTTOM SHEET ══════════════════════════════════ */
+#overlay {
+  display:none; position:fixed; inset:0; z-index:500;
+  background: rgba(218,212,204,.72);
+  backdrop-filter: blur(24px) saturate(1.1);
+  -webkit-backdrop-filter: blur(24px) saturate(1.1);
+  /* stick to bottom, let keyboard push it up */
+  align-items: flex-end; justify-content: center;
+}
+#overlay.active { display:flex; }
+
+#sheet {
+  width:100%; max-width:500px;
+  background: linear-gradient(180deg, #faf5ee 0%, #ede8e0 100%);
+  border-radius: 22px 22px 0 0;
+  box-shadow: 0 -4px 32px rgba(0,0,0,.10), 0 -1px 4px rgba(0,0,0,.05);
+  animation: sheetUp .32s cubic-bezier(.34,1.3,.64,1) both;
+  /* fixed height so toolbar never hides under keyboard */
+  display: flex; flex-direction: column;
+}
+@keyframes sheetUp {
+  from { transform:translateY(100%); opacity:0; }
+  to   { transform:translateY(0);    opacity:1; }
+}
+.handle {
+  width:38px; height:4px; background:rgba(42,36,32,.13);
+  border-radius:2px; margin:12px auto 8px; flex-shrink:0;
+}
+
+#sheet-date {
+  font-family:'Courier New',monospace; font-size:9px; letter-spacing:2px;
+  color:rgba(42,36,32,.28); text-align:center;
+  margin-bottom:10px; flex-shrink:0;
+}
+
+#photo-prev {
+  display:none; width:calc(100% - 48px); height:100px; object-fit:cover;
+  border-radius:8px; margin:0 24px 10px; opacity:.88; filter:saturate(.85);
+  flex-shrink:0;
+}
+#photo-prev.on { display:block; }
+
+/* textarea — fixed height, never grows past screen */
+#memo-text {
+  flex-shrink:0;
+  width:100%; background:transparent; border:none; outline:none;
+  font-family:inherit; font-size:22px; font-weight:300; line-height:1.55;
+  color:var(--ink); resize:none;
+  padding: 0 24px 8px;
+  height: 100px;
+  caret-color:rgba(42,36,32,.5);
+  overflow-y: auto;
+}
+#memo-text::placeholder { color:rgba(42,36,32,.18); }
+
+/* toolbar always at bottom of sheet, never hidden */
+#sheet-toolbar {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px 20px;
+  border-top: 1px solid rgba(42,36,32,.08);
+}
+
+#wc {
+  font-family:'Courier New',monospace; font-size:10px; letter-spacing:1.5px;
+  color:rgba(42,36,32,.22); flex:1; transition:color .15s;
+}
+#wc.over { color:#b05040; }
+
+/* camera button */
+#photo-btn {
+  width:44px; height:44px; flex-shrink:0;
+  background:rgba(42,36,32,.06);
+  border:1.5px solid rgba(42,36,32,.18); border-radius:50%;
+  color:rgba(42,36,32,.5); cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  transition:border-color .15s, background .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+#photo-btn:active { background:rgba(42,36,32,.12); }
+#photo-btn.has { border-color:rgba(80,140,80,.6); color:rgba(60,120,60,.8); background:rgba(80,140,80,.08); }
+
+/* send button */
+#save-btn {
+  width:48px; height:48px; flex-shrink:0;
+  background:linear-gradient(145deg,#2e2820,#1a1410);
+  border:none; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer;
+  box-shadow:0 3px 10px rgba(0,0,0,.28);
+  transition:transform .15s, box-shadow .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+#save-btn:not(:disabled):active {
+  transform:scale(.90);
+  box-shadow:0 1px 4px rgba(0,0,0,.25);
+}
+#save-btn:disabled { opacity:.2; cursor:not-allowed; }
+
+#cancel-bg { position:fixed; inset:0; z-index:-1; }
+#file-input { display:none; }
+
+/* ══ MEMORY VIEWER ═══════════════════════════════════════ */
+#viewer {
+  display:none; position:fixed; inset:0; z-index:600;
+  background:rgba(215,209,201,.90);
+  backdrop-filter:blur(30px) saturate(1.2);
+  -webkit-backdrop-filter:blur(30px) saturate(1.2);
+  align-items:center; justify-content:center; flex-direction:column;
+  cursor:pointer;
+}
+#viewer.active { display:flex; }
+
+#viewer-inner {
+  max-width:min(84vw,360px); text-align:center;
+  animation:popIn .38s cubic-bezier(.34,1.3,.64,1) both;
+}
+@keyframes popIn {
+  from { opacity:0; transform:scale(.84) translateY(16px); }
+  to   { opacity:1; transform:scale(1) translateY(0); }
+}
+#v-photo {
+  display:none; width:100%; max-height:50vh; object-fit:contain;
+  border-radius:10px; margin-bottom:24px; filter:saturate(.88);
+  box-shadow:0 4px 24px rgba(0,0,0,.12);
+}
+#v-photo.on { display:block; }
+#v-text {
+  font-size:clamp(22px,5.5vw,32px); font-weight:300; font-style:italic;
+  color:rgba(42,36,32,.84); line-height:1.52;
+}
+#v-date {
+  margin-top:18px; font-family:'Courier New',monospace;
+  font-size:9px; letter-spacing:2.5px; color:rgba(42,36,32,.26);
+}
+#v-hint {
+  position:absolute; bottom:30px;
+  font-family:'Courier New',monospace; font-size:8px;
+  letter-spacing:2px; color:rgba(42,36,32,.15);
+}
+
+/* ══ YEAR VIEWER ═════════════════════════════════════════ */
+#year-viewer {
+  display:none; position:fixed; inset:0; z-index:600;
+  background:rgba(232,226,218,.97); overflow-y:auto; padding:60px 28px 64px;
+}
+#year-viewer.active { display:block; }
+#yv-close {
+  position:fixed; top:18px; right:22px;
+  font-family:'Courier New',monospace; font-size:9px; letter-spacing:2px;
+  color:rgba(42,36,32,.3); cursor:pointer; padding:10px; z-index:10;
+  transition:color .15s;
+}
+#yv-close:hover { color:rgba(42,36,32,.65); }
+#yv-year { font-size:56px; font-weight:300; color:rgba(42,36,32,.78); text-align:center; margin-bottom:6px; }
+#yv-count {
+  text-align:center; font-family:'Courier New',monospace; font-size:9px;
+  letter-spacing:2px; color:rgba(42,36,32,.24); margin-bottom:40px;
+}
+.yv-item {
+  display:flex; align-items:flex-start; gap:14px; padding:16px 0;
+  border-bottom:1px solid rgba(42,36,32,.07); cursor:default;
+}
+.yv-dot { width:8px; height:8px; border-radius:2px; flex-shrink:0; margin-top:8px; }
+.yv-body { flex:1; }
+.yv-t { font-size:19px; font-weight:300; color:rgba(42,36,32,.72); line-height:1.45; }
+.yv-d {
+  margin-top:4px; font-family:'Courier New',monospace;
+  font-size:8px; letter-spacing:1.5px; color:rgba(42,36,32,.24);
+}
+.yv-thumb {
+  width:46px; height:46px; object-fit:cover; border-radius:4px;
+  opacity:.75; filter:saturate(.8); flex-shrink:0;
+}
+
+/* ══ ANIMATIONS ══════════════════════════════════════════ */
+@keyframes fall-down {
+  0%   { transform:translateY(-180px) rotate(var(--r0)) scale(.80); opacity:0; }
+  48%  { opacity:1; }
+  76%  { transform:translateY(var(--land)) rotate(var(--r1)) scale(1.04); }
+  90%  { transform:translateY(calc(var(--land) - 4px)) rotate(var(--r1)) scale(.98); }
+  100% { transform:translateY(var(--land)) rotate(var(--r1)) scale(1); opacity:1; }
+}
+@keyframes gather {
+  0%   { opacity:1; transform:scale(1); }
+  100% { opacity:0; transform:scale(.04) translate(var(--gx),var(--gy)); }
+}
+</style>
+</head>
+<body>
+
+<div id="canvas"></div>
+
+<!-- + button -->
+<button id="add-btn" aria-label="добавить воспоминание">
+  <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <line x1="12" y1="5" x2="12" y2="19" stroke="rgba(42,36,32,0.42)" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="5"  y1="12" x2="19" y2="12" stroke="rgba(42,36,32,0.42)" stroke-width="2.2" stroke-linecap="round"/>
+  </svg>
+</button>
+
+<div id="hint">свайп вверх · воспоминание</div>
+
+<!-- BOTTOM SHEET -->
+<div id="overlay">
+  <div id="cancel-bg"></div>
+  <div id="sheet">
+    <div class="handle"></div>
+    <div id="sheet-date"></div>
+    <img id="photo-prev" alt="">
+    <textarea id="memo-text" placeholder="что случилось сегодня…"></textarea>
+    <div id="sheet-toolbar">
+      <span id="wc">0 / 18</span>
+      <button id="photo-btn" title="сфотографировать">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+      </button>
+      <button id="save-btn" disabled>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(240,235,227,0.9)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="19" x2="12" y2="5"/>
+          <polyline points="5 12 12 5 19 12"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+  <input type="file" id="file-input" accept="image/*" capture="environment" style="display:none">
+</div>
+
+<!-- VIEWER -->
+<div id="viewer">
+  <div id="viewer-inner">
+    <img id="v-photo" alt="">
+    <div id="v-text"></div>
+    <div id="v-date"></div>
+  </div>
+  <div id="v-hint">нажми чтобы закрыть</div>
+</div>
+
+<!-- YEAR VIEWER -->
+<div id="year-viewer">
+  <div id="yv-close">✕ закрыть</div>
+  <div id="yv-year"></div>
+  <div id="yv-count"></div>
+  <div id="yv-list"></div>
+</div>
+
+<script>
+const PAL = [
+  '#d4b8a8','#b8c8b0','#b0b8cc','#ccc0a0','#c0b0cc','#a8c0c8',
+  '#ccaabb','#b8bc98','#a8b8c8','#ccb0a8','#a8c8b8','#c8b0a8',
+  '#a8b8cc','#c8c0a8','#c0a8b8','#bcc4a0','#a8c4b8','#c4b0bc',
+  '#b0c4b8','#c4b8a8','#d0c0b0','#b0c0d0','#c0d0b0','#d0b0c0','#b8d0c0',
+];
+const rC  = () => PAL[ri(0, PAL.length-1)];
+const rb  = (a,b) => a + Math.random()*(b-a);
+const ri  = (a,b) => Math.floor(rb(a,b+1));
+const SZ  = [[72,72],[90,70],[70,90],[104,68],[68,104],[80,80],[96,64],[64,96],[86,58],[58,86],[76,76],[108,70],[70,108],[84,60],[60,84],[92,74],[74,92]];
+const rSz = () => SZ[ri(0,SZ.length-1)];
+const $   = id => document.getElementById(id);
+const yr  = () => new Date().getFullYear();
+
+// ── IndexedDB ──────────────────────────────────
+let idb;
+function openDB(){
+  return new Promise((res,rej)=>{
+    const r=indexedDB.open('archiv',1);
+    r.onupgradeneeded=e=>{
+      const db=e.target.result;
+      ['mems','photos','meta'].forEach(s=>{
+        if(!db.objectStoreNames.contains(s)) db.createObjectStore(s,{keyPath:'id'});
+      });
+    };
+    r.onsuccess=e=>{idb=e.target.result;res();};
+    r.onerror=e=>rej(e.target.error);
+  });
+}
+const ts  = (s,m='readonly') => idb.transaction(s,m).objectStore(s);
+const put = (s,o) => new Promise((res,rej)=>{ const r=ts(s,'readwrite').put(o); r.onsuccess=()=>res(); r.onerror=e=>rej(e.target.error); });
+const get = (s,k) => new Promise((res,rej)=>{ const r=ts(s).get(k); r.onsuccess=e=>res(e.target.result); r.onerror=e=>rej(e.target.error); });
+const all = s    => new Promise((res,rej)=>{ const r=ts(s).getAll(); r.onsuccess=e=>res(e.target.result); r.onerror=e=>rej(e.target.error); });
+
+// ── State ──────────────────────────────────────
+let mems=[], years=[];
+async function loadState(){
+  mems  = await all('mems');
+  const y = await get('meta','years');
+  years = y ? y.value : [];
+}
+const saveMem   = m  => put('mems', m);
+const saveYears = () => put('meta', {id:'years', value:years});
+const savePhoto = (id,d) => put('photos',{id,dataUrl:d});
+async function loadPhoto(id){ const r=await get('photos',id); return r?r.dataUrl:null; }
+
+// ── Layout: bias toward bottom ─────────────────
+function packSpot(w,h){
+  const vw=innerWidth, vh=innerHeight, P=6, TOP=130;
+  const rects=[
+    ...mems.filter(m=>m.on&&m.year===yr()).map(m=>({x:m.bx,y:m.by,w:m.bw,h:m.bh})),
+    ...years.map(y=>({x:y.bx,y:y.by,w:y.bw,h:y.bh})),
+  ];
+  for(let i=0;i<200;i++){
+    const x = rb(P, vw-w-P);
+    // power < 1 biases toward BOTTOM (higher y values)
+    const y = TOP + (vh-h-P-TOP) * Math.pow(Math.random(), 0.35);
+    let ok=true;
+    for(const r of rects){
+      if(x<r.x+r.w+P && x+w+P>r.x && y<r.y+r.h+P && y+h+P>r.y){ok=false;break;}
+    }
+    if(ok) return{x,y};
+  }
+  return{x:rb(P,vw-w-P), y:rb(TOP,vh-h-P)};
+}
+
+// ── DOM builders ───────────────────────────────
+function mkBlock(m){
+  const el=document.createElement('div');
+  el.className='block'; el.dataset.id=m.id;
+  el.style.cssText=`left:${m.bx}px;top:${m.by}px;width:${m.bw}px;height:${m.bh}px;background:${m.color};`;
+  // TAP = pulse only, no open
+  el.addEventListener('click', ()=>{
+    el.classList.remove('pulsing');
+    void el.offsetWidth; // reflow to restart
+    el.classList.add('pulsing');
+    el.addEventListener('animationend',()=>el.classList.remove('pulsing'),{once:true});
+  });
+  return el;
+}
+function mkYearBlock(yb){
+  const el=document.createElement('div');
+  el.className='year-block'; el.dataset.year=yb.year;
+  el.style.cssText=`left:${yb.bx}px;top:${yb.by}px;width:${yb.bw}px;height:${yb.bh}px;background:linear-gradient(135deg,${yb.c1},${yb.c2});`;
+  el.innerHTML=`<div class="yl">архив</div><div class="yn">${yb.year}</div>`;
+  el.addEventListener('click', ()=>openYear(yb.year));
+  return el;
+}
+function renderAll(){
+  document.querySelectorAll('.block,.year-block').forEach(e=>e.remove());
+  const cv=$('canvas');
+  mems.filter(m=>m.on&&m.year===yr()).forEach(m=>cv.appendChild(mkBlock(m)));
+  years.forEach(yb=>cv.appendChild(mkYearBlock(yb)));
+}
+
+// ── Compress photo ─────────────────────────────
+function compress(url,maxW=960){
+  return new Promise(res=>{
+    const img=new Image();
+    img.onload=()=>{
+      const s=Math.min(1,maxW/img.width);
+      const c=document.createElement('canvas');
+      c.width=Math.round(img.width*s); c.height=Math.round(img.height*s);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      res(c.toDataURL('image/jpeg',.80));
+    };
+    img.src=url;
+  });
+}
+
+// ── Input ──────────────────────────────────────
+let pendingB64=null;
+const $tx=$('memo-text'), $wc=$('wc'), $sv=$('save-btn');
+const wcnt = s => s.trim()===''?0:s.trim().split(/\s+/).length;
+
+$('add-btn').addEventListener('click',()=>{
+  $('overlay').classList.add('active');
+  // show today's date
+  const now = new Date();
+  $('sheet-date').textContent = now.toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'});
+  setTimeout(()=>$tx.focus(), 80);
+});
+$('cancel-bg').addEventListener('click', closeSheet);
+
+$tx.addEventListener('input',()=>{
+  const w=wcnt($tx.value);
+  $wc.textContent=`${w} / 18`;
+  $wc.classList.toggle('over',w>18);
+  $sv.disabled=(w===0&&!pendingB64)||w>18;
+});
+
+// ── Camera via file input (triggers onShowFileChooser in MainActivity) ──
+$('photo-btn').addEventListener('click', ()=>{
+  $('file-input').click();
+});
+
+$('file-input').addEventListener('change', async e=>{
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = async ev => {
+    pendingB64 = await compress(ev.target.result);
+    const p = $('photo-prev');
+    p.src = pendingB64; p.classList.add('on');
+    $('photo-btn').classList.add('has');
+    $sv.disabled = false;
+  };
+  r.readAsDataURL(f);
+});
+
+function closeSheet(){
+  $('overlay').classList.remove('active');
+  $tx.value=''; pendingB64=null;
+  $wc.textContent='0 / 18'; $wc.classList.remove('over'); $sv.disabled=true;
+  const p=$('photo-prev'); p.classList.remove('on'); p.src='';
+  $('photo-btn').classList.remove('has');
+  $('file-input').value='';
+  $('sheet-date').textContent='';
+}
+
+$sv.addEventListener('click', async()=>{
+  $sv.disabled=true;
+  const text=$tx.value.trim(), now=new Date();
+  const [w,h]=rSz(), {x,y}=packSpot(w,h), id=now.getTime();
+  const m={id,text,hasPhoto:!!pendingB64,color:rC(),date:now.toISOString(),
+    year:now.getFullYear(),on:true,bx:x,by:y,bw:w,bh:h};
+  if(pendingB64) await savePhoto(id,pendingB64);
+  await saveMem(m); mems.push(m);
+  closeSheet(); dropBlock(m); checkRollover();
+  // hide hint after first memory
+  $('hint').style.opacity='0';
+});
+
+// ── Drop animation ─────────────────────────────
+function dropBlock(m){
+  const cv=$('canvas'), el=document.createElement('div');
+  el.className='block'; el.dataset.id=m.id;
+  const r0=rb(-10,10), r1=rb(-2,2);
+  el.style.cssText=`
+    left:${m.bx}px;top:0px;
+    width:${m.bw}px;height:${m.bh}px;
+    background:${m.color};
+    --r0:${r0}deg;--r1:${r1}deg;--land:${m.by}px;
+    animation:fall-down .72s cubic-bezier(.22,1,.36,1) forwards;
+  `;
+  el.addEventListener('animationend',()=>{
+    el.style.cssText=`left:${m.bx}px;top:${m.by}px;width:${m.bw}px;height:${m.bh}px;background:${m.color};`;
+    el.style.animation='';
+    // pulse-only on tap
+    el.addEventListener('click',()=>{
+      el.classList.remove('pulsing');
+      void el.offsetWidth;
+      el.classList.add('pulsing');
+      el.addEventListener('animationend',()=>el.classList.remove('pulsing'),{once:true});
+    });
+  },{once:true});
+  cv.appendChild(el);
+}
+
+// ── Viewer ─────────────────────────────────────
+async function openMem(id){
+  const m=mems.find(x=>x.id===id); if(!m)return;
+  const vp=$('v-photo');
+  if(m.hasPhoto){
+    const u=await loadPhoto(id);
+    if(u){vp.src=u;vp.classList.add('on');}
+    else{vp.classList.remove('on');vp.src='';}
+  } else { vp.classList.remove('on'); vp.src=''; }
+  $('v-text').textContent=m.text||'';
+  const d=new Date(m.date);
+  $('v-date').textContent=d.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
+  $('viewer').classList.add('active');
+}
+$('viewer').addEventListener('click',()=>$('viewer').classList.remove('active'));
+
+// ── SWIPE UP ONLY → random memory ──────────────
+let t0=0, tId=null;
+document.addEventListener('touchstart', e=>{
+  t0=e.touches[0].clientY;
+},{passive:true});
+document.addEventListener('touchend', e=>{
+  const dy = t0 - e.changedTouches[0].clientY;
+  if($('overlay').classList.contains('active')) return;
+  if($('viewer').classList.contains('active')) return;
+  if(dy > 52) openRandom();
+},{passive:true});
+
+// mouse wheel also triggers random
+let wLock=false;
+document.addEventListener('wheel', e=>{
+  if($('overlay').classList.contains('active')) return;
+  if($('viewer').classList.contains('active')) return;
+  if(wLock||Math.abs(e.deltaY)<30) return;
+  wLock=true; openRandom(); setTimeout(()=>{wLock=false;},600);
+},{passive:true});
+
+function openRandom(){
+  const active=mems.filter(m=>m.on&&m.year===yr());
+  // pick from all mems if nothing active
+  const pool = active.length ? active : mems;
+  if(!pool.length) return;
+  openMem(pool[ri(0,pool.length-1)].id);
+}
+
+// ── Year rollover ──────────────────────────────
+function checkRollover(){
+  const now=new Date(), prev=now.getFullYear()-1;
+  if(now.getMonth()!==0) return;
+  if(years.find(y=>y.year===prev)) return;
+  const ms=mems.filter(m=>m.year===prev&&m.on);
+  if(ms.length) archiveYear(prev,ms);
+}
+async function archiveYear(year,ms){
+  const cv=$('canvas'), vw=innerWidth, vh=innerHeight;
+  const tx=vw-20, ty=vh/2;
+  ms.forEach((m,i)=>{
+    const el=cv.querySelector(`.block[data-id="${m.id}"]`);
+    if(el){
+      const dx=tx-(m.bx+m.bw/2), dy=ty-(m.by+m.bh/2);
+      el.style.setProperty('--gx',`${dx}px`); el.style.setProperty('--gy',`${dy}px`);
+      el.style.animation=`gather .6s ${i*14}ms cubic-bezier(.6,0,.4,1) forwards`;
+      el.addEventListener('animationend',()=>el.remove(),{once:true});
+    }
+    m.on=false; saveMem(m);
+  });
+  const bw=Math.min(128,76+ms.length*3), bh=Math.min(148,86+ms.length*3);
+  const bx=vw-bw-14-years.length*(bw+12), by=Math.max(130,vh/2-bh/2);
+  const yb={year,c1:rC(),c2:rC(),bx,by,bw,bh};
+  years.push(yb); await saveYears();
+  setTimeout(()=>$('canvas').appendChild(mkYearBlock(yb)), ms.length*14+650);
+}
+
+// ── Year viewer ────────────────────────────────
+async function openYear(year){
+  const ms=mems.filter(m=>m.year===year);
+  $('yv-year').textContent=year;
+  $('yv-count').textContent=`${ms.length}\u00a0${pl(ms.length,'воспоминание','воспоминания','воспоминаний')}`;
+  const list=$('yv-list'); list.innerHTML='';
+  for(const m of ms){
+    const d=new Date(m.date);
+    const item=document.createElement('div'); item.className='yv-item';
+    item.innerHTML=`
+      <div class="yv-dot" style="background:${m.color}"></div>
+      <div class="yv-body">
+        <div class="yv-t">${m.text||'<em style="opacity:.4">фотография</em>'}</div>
+        <div class="yv-d">${d.toLocaleDateString('ru-RU',{day:'numeric',month:'long'})}</div>
+      </div>`;
+    if(m.hasPhoto){
+      const u=await loadPhoto(m.id);
+      if(u){const img=document.createElement('img');img.className='yv-thumb';img.src=u;img.alt='';item.appendChild(img);}
+    }
+    list.appendChild(item);
+  }
+  $('year-viewer').classList.add('active');
+}
+$('yv-close').addEventListener('click',()=>$('year-viewer').classList.remove('active'));
+
+function pl(n,a,b,c){const m=n%10,h=n%100;if(h>=11&&h<=19)return c;if(m===1)return a;if(m>=2&&m<=4)return b;return c;}
+
+// ── Keyboard ───────────────────────────────────
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape') ['overlay','viewer','year-viewer'].forEach(id=>$(id).classList.remove('active'));
+  if(e.key==='y'||e.key==='Y'){
+    const y=yr(); if(years.find(x=>x.year===y))return;
+    const ms=mems.filter(m=>m.year===y&&m.on); if(ms.length)archiveYear(y,ms);
+  }
+});
+
+if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
+
+openDB().then(async()=>{
+  await loadState(); renderAll(); checkRollover();
+  if(mems.length>0) $('hint').style.opacity='0';
+});
+</script>
+</body>
+</html>
