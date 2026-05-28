@@ -316,7 +316,70 @@ body::after {
   opacity:.75; filter:saturate(.8); flex-shrink:0;
 }
 
-/* ══ ANIMATIONS ══════════════════════════════════════════ */
+/* ══ ARCHIVE SECOND SCREEN ═══════════════════════════════ */
+#archive-screen {
+  display: none;
+  position: fixed; inset: 0; z-index: 400;
+  background: var(--milk);
+  transform: translateX(100%);
+  transition: transform .4s cubic-bezier(.34,1.1,.64,1);
+  overflow: hidden;
+}
+#archive-screen.active {
+  display: block;
+  transform: translateX(0);
+  animation: slideInRight .4s cubic-bezier(.34,1.1,.64,1) both;
+}
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+#archive-header {
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 90px; z-index: 10;
+  display: flex; align-items: flex-end; justify-content: center;
+  padding-bottom: 10px;
+  background: linear-gradient(180deg, var(--milk) 70%, transparent 100%);
+}
+#archive-title {
+  font-size: 52px; font-weight: 300;
+  color: rgba(42,36,32,.75); line-height: 1;
+}
+#archive-close {
+  position: absolute; top: 22px; right: 20px;
+  font-family: 'Courier New', monospace; font-size: 9px;
+  letter-spacing: 2px; color: rgba(42,36,32,.3);
+  cursor: pointer; padding: 10px;
+  transition: color .15s;
+}
+#archive-close:hover { color: rgba(42,36,32,.65); }
+#archive-mosaic {
+  position: absolute; inset: 0;
+  overflow: hidden;
+}
+.archive-tile {
+  position: absolute;
+  border-radius: 5px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.10), inset 0 1px 0 rgba(255,255,255,.5);
+}
+.archive-tile::before {
+  content:''; position:absolute; inset:0; z-index:1;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 80 80' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  background-size:60px; mix-blend-mode:multiply; opacity:.09; pointer-events:none;
+}
+#archive-hint {
+  position: absolute; bottom: 28px; left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Courier New', monospace; font-size: 8px;
+  letter-spacing: 2.5px; color: rgba(42,36,32,.18);
+  pointer-events: none; white-space: nowrap;
+}
+#archive-hint::before {
+  content: '↑  ';
+  animation: bob 2.4s ease-in-out infinite;
+  display: inline-block;
+}
+
 @keyframes fall-down {
   0%   { transform:translateY(-180px) rotate(var(--r0)) scale(.80); opacity:0; }
   48%  { opacity:1; }
@@ -371,6 +434,16 @@ body::after {
   <input type="file" id="file-input" accept="image/*" capture="environment" style="display:none">
 </div>
 
+<!-- ARCHIVE SECOND SCREEN -->
+<div id="archive-screen">
+  <div id="archive-mosaic"></div>
+  <div id="archive-header">
+    <div id="archive-title"></div>
+  </div>
+  <div id="archive-close">✕ закрыть</div>
+  <div id="archive-hint">свайп вверх · воспоминание</div>
+</div>
+
 <!-- VIEWER -->
 <div id="viewer">
   <div id="viewer-inner">
@@ -396,19 +469,19 @@ const PAL = [
   '#a8b8cc','#c8c0a8','#c0a8b8','#bcc4a0','#a8c4b8','#c4b0bc',
   '#b0c4b8','#c4b8a8','#d0c0b0','#b0c0d0','#c0d0b0','#d0b0c0','#b8d0c0',
 ];
-const rC  = () => PAL[ri(0, PAL.length-1)];
-const rb  = (a,b) => a + Math.random()*(b-a);
+const rC  = () => PAL[ri(0,PAL.length-1)];
+const rb  = (a,b) => a+Math.random()*(b-a);
 const ri  = (a,b) => Math.floor(rb(a,b+1));
+// Original sizes at scale=1
 const SZ  = [[72,72],[90,70],[70,90],[104,68],[68,104],[80,80],[96,64],[64,96],[86,58],[58,86],[76,76],[108,70],[70,108],[84,60],[60,84],[92,74],[74,92]];
 const rSz = () => SZ[ri(0,SZ.length-1)];
 const $   = id => document.getElementById(id);
-const yr  = () => new Date().getFullYear();
 
-// ── IndexedDB ──────────────────────────────────
+// ── IndexedDB ─────────────────────────────────
 let idb;
 function openDB(){
   return new Promise((res,rej)=>{
-    const r=indexedDB.open('archiv',1);
+    const r=indexedDB.open('archiv',2);
     r.onupgradeneeded=e=>{
       const db=e.target.result;
       ['mems','photos','meta'].forEach(s=>{
@@ -419,73 +492,109 @@ function openDB(){
     r.onerror=e=>rej(e.target.error);
   });
 }
-const ts  = (s,m='readonly') => idb.transaction(s,m).objectStore(s);
-const put = (s,o) => new Promise((res,rej)=>{ const r=ts(s,'readwrite').put(o); r.onsuccess=()=>res(); r.onerror=e=>rej(e.target.error); });
-const get = (s,k) => new Promise((res,rej)=>{ const r=ts(s).get(k); r.onsuccess=e=>res(e.target.result); r.onerror=e=>rej(e.target.error); });
-const all = s    => new Promise((res,rej)=>{ const r=ts(s).getAll(); r.onsuccess=e=>res(e.target.result); r.onerror=e=>rej(e.target.error); });
+const ts  = (s,m='readonly')=>idb.transaction(s,m).objectStore(s);
+const put = (s,o)=>new Promise((res,rej)=>{const r=ts(s,'readwrite').put(o);r.onsuccess=()=>res();r.onerror=e=>rej(e.target.error);});
+const get = (s,k)=>new Promise((res,rej)=>{const r=ts(s).get(k);r.onsuccess=e=>res(e.target.result);r.onerror=e=>rej(e.target.error);});
+const all = s=>new Promise((res,rej)=>{const r=ts(s).getAll();r.onsuccess=e=>res(e.target.result);r.onerror=e=>rej(e.target.error);});
 
-// ── State ──────────────────────────────────────
+// ── State ─────────────────────────────────────
 let mems=[], years=[];
+// tileScale: blocks shrink when screen fills up
+let tileScale = 1.0;
+
 async function loadState(){
-  mems  = await all('mems');
+  mems = await all('mems');
   const y = await get('meta','years');
   years = y ? y.value : [];
+  const sc = await get('meta','tileScale');
+  tileScale = sc ? sc.value : 1.0;
 }
-const saveMem   = m  => put('mems', m);
-const saveYears = () => put('meta', {id:'years', value:years});
+const saveMem   = m => put('mems',m);
+const saveYears = () => put('meta',{id:'years',value:years});
+const saveScale = () => put('meta',{id:'tileScale',value:tileScale});
 const savePhoto = (id,d) => put('photos',{id,dataUrl:d});
 async function loadPhoto(id){ const r=await get('photos',id); return r?r.dataUrl:null; }
 
-// ── Layout: bias toward bottom ─────────────────
-function packSpot(w,h){
-  const vw=innerWidth, vh=innerHeight, P=6, TOP=130;
-  const rects=[
-    ...mems.filter(m=>m.on&&m.year===yr()).map(m=>({x:m.bx,y:m.by,w:m.bw,h:m.bh})),
-    ...years.map(y=>({x:y.bx,y:y.by,w:y.bw,h:y.bh})),
-  ];
-  for(let i=0;i<200;i++){
-    const x = rb(P, vw-w-P);
-    // power < 1 biases toward BOTTOM (higher y values)
-    const y = TOP + (vh-h-P-TOP) * Math.pow(Math.random(), 0.35);
-    let ok=true;
-    for(const r of rects){
-      if(x<r.x+r.w+P && x+w+P>r.x && y<r.y+r.h+P && y+h+P>r.y){ok=false;break;}
-    }
-    if(ok) return{x,y};
-  }
-  return{x:rb(P,vw-w-P), y:rb(TOP,vh-h-P)};
+function curYear(){
+  // Use year of current "session" — first memory defines the epoch
+  const active = mems.filter(m=>m.on);
+  if(active.length) return new Date(active[0].date).getFullYear();
+  return new Date().getFullYear();
 }
 
-// ── DOM builders ───────────────────────────────
+// ── Layout with shrink ────────────────────────
+// Positions stored at scale=1 (origBx/By/Bw/Bh)
+// Actual render: origB* * tileScale
+
+function scaledRect(m){
+  return {
+    x: Math.round(m.origBx * tileScale),
+    y: Math.round(m.origBy * tileScale),
+    w: Math.round(m.origBw * tileScale),
+    h: Math.round(m.origBh * tileScale)
+  };
+}
+
+function packSpot(origW, origH){
+  // Work in original (scale=1) coordinates
+  const vw=innerWidth, vh=innerHeight, P=6, TOP=130;
+  const rects = mems.filter(m=>m.on).map(m=>({
+    x:m.origBx, y:m.origBy, w:m.origBw, h:m.origBh
+  }));
+
+  for(let i=0;i<220;i++){
+    const x = rb(P, vw-origW-P);
+    const y = TOP + (vh-origH-P-TOP) * Math.pow(Math.random(), 0.35);
+    let ok=true;
+    for(const r of rects){
+      if(x<r.x+r.w+P && x+origW+P>r.x && y<r.y+r.h+P && y+origH+P>r.y){ok=false;break;}
+    }
+    if(ok) return {x,y};
+  }
+  return null; // Screen full — need to shrink
+}
+
+function shrinkAll(){
+  tileScale = Math.max(0.38, tileScale - 0.07);
+  saveScale();
+  // Update all DOM blocks to new scaled positions
+  const cv = $('canvas');
+  mems.filter(m=>m.on).forEach(m=>{
+    const el = cv.querySelector(`.block[data-id="${m.id}"]`);
+    if(!el) return;
+    const r = scaledRect(m);
+    el.style.left   = r.x+'px';
+    el.style.top    = r.y+'px';
+    el.style.width  = r.w+'px';
+    el.style.height = r.h+'px';
+    // Store actual positions for collision
+    m.bx=r.x; m.by=r.y; m.bw=r.w; m.bh=r.h;
+  });
+}
+
+// ── DOM builders ──────────────────────────────
 function mkBlock(m){
   const el=document.createElement('div');
   el.className='block'; el.dataset.id=m.id;
-  el.style.cssText=`left:${m.bx}px;top:${m.by}px;width:${m.bw}px;height:${m.bh}px;background:${m.color};`;
-  // TAP = pulse only, no open
-  el.addEventListener('click', ()=>{
+  const r=scaledRect(m);
+  el.style.cssText=`left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;background:${m.color};`;
+  el.addEventListener('click',()=>{
     el.classList.remove('pulsing');
-    void el.offsetWidth; // reflow to restart
+    void el.offsetWidth;
     el.classList.add('pulsing');
     el.addEventListener('animationend',()=>el.classList.remove('pulsing'),{once:true});
   });
   return el;
 }
-function mkYearBlock(yb){
-  const el=document.createElement('div');
-  el.className='year-block'; el.dataset.year=yb.year;
-  el.style.cssText=`left:${yb.bx}px;top:${yb.by}px;width:${yb.bw}px;height:${yb.bh}px;background:linear-gradient(135deg,${yb.c1},${yb.c2});`;
-  el.innerHTML=`<div class="yl">архив</div><div class="yn">${yb.year}</div>`;
-  el.addEventListener('click', ()=>openYear(yb.year));
-  return el;
-}
+
 function renderAll(){
   document.querySelectorAll('.block,.year-block').forEach(e=>e.remove());
   const cv=$('canvas');
-  mems.filter(m=>m.on&&m.year===yr()).forEach(m=>cv.appendChild(mkBlock(m)));
+  mems.filter(m=>m.on).forEach(m=>cv.appendChild(mkBlock(m)));
   years.forEach(yb=>cv.appendChild(mkYearBlock(yb)));
 }
 
-// ── Compress photo ─────────────────────────────
+// ── Compress ──────────────────────────────────
 function compress(url,maxW=960){
   return new Promise(res=>{
     const img=new Image();
@@ -500,19 +609,18 @@ function compress(url,maxW=960){
   });
 }
 
-// ── Input ──────────────────────────────────────
+// ── Input ─────────────────────────────────────
 let pendingB64=null;
 const $tx=$('memo-text'), $wc=$('wc'), $sv=$('save-btn');
-const wcnt = s => s.trim()===''?0:s.trim().split(/\s+/).length;
+const wcnt=s=>s.trim()===''?0:s.trim().split(/\s+/).length;
 
 $('add-btn').addEventListener('click',()=>{
   $('overlay').classList.add('active');
-  // show today's date
-  const now = new Date();
-  $('sheet-date').textContent = now.toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'});
-  setTimeout(()=>$tx.focus(), 80);
+  const now=new Date();
+  $('sheet-date').textContent=now.toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'});
+  setTimeout(()=>$tx.focus(),80);
 });
-$('cancel-bg').addEventListener('click', closeSheet);
+$('cancel-bg').addEventListener('click',closeSheet);
 
 $tx.addEventListener('input',()=>{
   const w=wcnt($tx.value);
@@ -521,21 +629,14 @@ $tx.addEventListener('input',()=>{
   $sv.disabled=(w===0&&!pendingB64)||w>18;
 });
 
-// ── Camera via file input (triggers onShowFileChooser in MainActivity) ──
-$('photo-btn').addEventListener('click', ()=>{
-  $('file-input').click();
-});
-
-$('file-input').addEventListener('change', async e=>{
-  const f = e.target.files[0];
-  if (!f) return;
-  const r = new FileReader();
-  r.onload = async ev => {
-    pendingB64 = await compress(ev.target.result);
-    const p = $('photo-prev');
-    p.src = pendingB64; p.classList.add('on');
-    $('photo-btn').classList.add('has');
-    $sv.disabled = false;
+$('photo-btn').addEventListener('click',()=>{ $('file-input').click(); });
+$('file-input').addEventListener('change',async e=>{
+  const f=e.target.files[0]; if(!f)return;
+  const r=new FileReader();
+  r.onload=async ev=>{
+    pendingB64=await compress(ev.target.result);
+    const p=$('photo-prev'); p.src=pendingB64; p.classList.add('on');
+    $('photo-btn').classList.add('has'); $sv.disabled=false;
   };
   r.readAsDataURL(f);
 });
@@ -550,38 +651,54 @@ function closeSheet(){
   $('sheet-date').textContent='';
 }
 
-$sv.addEventListener('click', async()=>{
+$sv.addEventListener('click',async()=>{
   $sv.disabled=true;
   const text=$tx.value.trim(), now=new Date();
-  const [w,h]=rSz(), {x,y}=packSpot(w,h), id=now.getTime();
-  const m={id,text,hasPhoto:!!pendingB64,color:rC(),date:now.toISOString(),
-    year:now.getFullYear(),on:true,bx:x,by:y,bw:w,bh:h};
+  const [origW,origH]=rSz();
+  const id=now.getTime();
+
+  // Try to find free spot; shrink if needed
+  let spot=packSpot(origW,origH);
+  if(!spot){
+    shrinkAll();
+    spot=packSpot(origW,origH);
+    if(!spot) spot={x:rb(6,innerWidth-origW-6), y:rb(130,innerHeight-origH-6)};
+  }
+
+  const m={
+    id, text, hasPhoto:!!pendingB64, color:rC(),
+    date:now.toISOString(), year:now.getFullYear(), on:true,
+    origBx:spot.x, origBy:spot.y, origBw:origW, origBh:origH,
+    bx:Math.round(spot.x*tileScale), by:Math.round(spot.y*tileScale),
+    bw:Math.round(origW*tileScale),  bh:Math.round(origH*tileScale),
+  };
   if(pendingB64) await savePhoto(id,pendingB64);
   await saveMem(m); mems.push(m);
-  closeSheet(); dropBlock(m); checkRollover();
-  // hide hint after first memory
+  closeSheet(); dropBlock(m);
   $('hint').style.opacity='0';
+
+  // Check 1-year anniversary from very first memory
+  checkAnniversary();
 });
 
-// ── Drop animation ─────────────────────────────
+// ── Drop animation ────────────────────────────
 function dropBlock(m){
   const cv=$('canvas'), el=document.createElement('div');
   el.className='block'; el.dataset.id=m.id;
+  const r=scaledRect(m);
   const r0=rb(-10,10), r1=rb(-2,2);
   el.style.cssText=`
-    left:${m.bx}px;top:0px;
-    width:${m.bw}px;height:${m.bh}px;
+    left:${r.x}px;top:0px;
+    width:${r.w}px;height:${r.h}px;
     background:${m.color};
-    --r0:${r0}deg;--r1:${r1}deg;--land:${m.by}px;
+    --r0:${r0}deg;--r1:${r1}deg;--land:${r.y}px;
     animation:fall-down .72s cubic-bezier(.22,1,.36,1) forwards;
   `;
   el.addEventListener('animationend',()=>{
-    el.style.cssText=`left:${m.bx}px;top:${m.by}px;width:${m.bw}px;height:${m.bh}px;background:${m.color};`;
+    el.style.cssText=`left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;background:${m.color};`;
     el.style.animation='';
-    // pulse-only on tap
     el.addEventListener('click',()=>{
-      el.classList.remove('pulsing');
-      void el.offsetWidth;
+      el.classList.remove('pulsing'); void el.offsetWidth;
       el.classList.add('pulsing');
       el.addEventListener('animationend',()=>el.classList.remove('pulsing'),{once:true});
     });
@@ -589,7 +706,10 @@ function dropBlock(m){
   cv.appendChild(el);
 }
 
-// ── Viewer ─────────────────────────────────────
+// ── Memory viewer ─────────────────────────────
+// Which pool are we viewing — main or archive year
+let viewerPool = null;
+
 async function openMem(id){
   const m=mems.find(x=>x.id===id); if(!m)return;
   const vp=$('v-photo');
@@ -597,7 +717,7 @@ async function openMem(id){
     const u=await loadPhoto(id);
     if(u){vp.src=u;vp.classList.add('on');}
     else{vp.classList.remove('on');vp.src='';}
-  } else { vp.classList.remove('on'); vp.src=''; }
+  } else {vp.classList.remove('on');vp.src='';}
   $('v-text').textContent=m.text||'';
   const d=new Date(m.date);
   $('v-date').textContent=d.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
@@ -605,103 +725,168 @@ async function openMem(id){
 }
 $('viewer').addEventListener('click',()=>$('viewer').classList.remove('active'));
 
-// ── SWIPE UP ONLY → random memory ──────────────
-let t0=0, tId=null;
-document.addEventListener('touchstart', e=>{
-  t0=e.touches[0].clientY;
-},{passive:true});
-document.addEventListener('touchend', e=>{
-  const dy = t0 - e.changedTouches[0].clientY;
+// ── Swipe up → random ─────────────────────────
+let t0=0, wLock=false;
+document.addEventListener('touchstart',e=>{t0=e.touches[0].clientY;},{passive:true});
+document.addEventListener('touchend',e=>{
   if($('overlay').classList.contains('active')) return;
   if($('viewer').classList.contains('active')) return;
-  if(dy > 52) openRandom();
+  if($('archive-screen').classList.contains('active')){
+    // Swipe up on archive screen → random from that archive
+    if(t0-e.changedTouches[0].clientY>52 && viewerPool && viewerPool.length)
+      openMem(viewerPool[ri(0,viewerPool.length-1)].id);
+    return;
+  }
+  if(t0-e.changedTouches[0].clientY>52) openRandom();
 },{passive:true});
 
-// mouse wheel also triggers random
-let wLock=false;
-document.addEventListener('wheel', e=>{
+document.addEventListener('wheel',e=>{
   if($('overlay').classList.contains('active')) return;
   if($('viewer').classList.contains('active')) return;
   if(wLock||Math.abs(e.deltaY)<30) return;
-  wLock=true; openRandom(); setTimeout(()=>{wLock=false;},600);
+  wLock=true;
+  if($('archive-screen').classList.contains('active')){
+    if(viewerPool && viewerPool.length) openMem(viewerPool[ri(0,viewerPool.length-1)].id);
+  } else {
+    openRandom();
+  }
+  setTimeout(()=>{wLock=false;},600);
 },{passive:true});
 
 function openRandom(){
-  const active=mems.filter(m=>m.on&&m.year===yr());
-  // pick from all mems if nothing active
-  const pool = active.length ? active : mems;
+  const pool=mems.filter(m=>m.on);
   if(!pool.length) return;
   openMem(pool[ri(0,pool.length-1)].id);
 }
 
-// ── Year rollover ──────────────────────────────
-function checkRollover(){
-  const now=new Date(), prev=now.getFullYear()-1;
-  if(now.getMonth()!==0) return;
-  if(years.find(y=>y.year===prev)) return;
-  const ms=mems.filter(m=>m.year===prev&&m.on);
-  if(ms.length) archiveYear(prev,ms);
+// ── Anniversary: 1 year after first memory ────
+function checkAnniversary(){
+  if(!mems.length) return;
+  const first = mems.reduce((a,b)=>a.id<b.id?a:b);
+  const firstDate = new Date(first.date);
+  const now = new Date();
+  // 1 year has passed since first memory
+  const oneYearLater = new Date(firstDate);
+  oneYearLater.setFullYear(firstDate.getFullYear()+1);
+  if(now < oneYearLater) return;
+
+  // Already archived this epoch?
+  const epochYear = firstDate.getFullYear();
+  if(years.find(y=>y.year===epochYear)) return;
+
+  const ms = mems.filter(m=>m.on);
+  if(ms.length) archiveYear(epochYear, ms);
 }
-async function archiveYear(year,ms){
+
+async function archiveYear(year, ms){
   const cv=$('canvas'), vw=innerWidth, vh=innerHeight;
-  const tx=vw-20, ty=vh/2;
+  const tx=vw/2, ty=vh/2;
+
+  // All blocks gather to center, then disappear
   ms.forEach((m,i)=>{
     const el=cv.querySelector(`.block[data-id="${m.id}"]`);
     if(el){
-      const dx=tx-(m.bx+m.bw/2), dy=ty-(m.by+m.bh/2);
-      el.style.setProperty('--gx',`${dx}px`); el.style.setProperty('--gy',`${dy}px`);
-      el.style.animation=`gather .6s ${i*14}ms cubic-bezier(.6,0,.4,1) forwards`;
+      const r=scaledRect(m);
+      const dx=tx-(r.x+r.w/2), dy=ty-(r.y+r.h/2);
+      el.style.setProperty('--gx',`${dx}px`);
+      el.style.setProperty('--gy',`${dy}px`);
+      el.style.animation=`gather .7s ${i*12}ms cubic-bezier(.6,0,.4,1) forwards`;
       el.addEventListener('animationend',()=>el.remove(),{once:true});
     }
     m.on=false; saveMem(m);
   });
-  const bw=Math.min(128,76+ms.length*3), bh=Math.min(148,86+ms.length*3);
-  const bx=vw-bw-14-years.length*(bw+12), by=Math.max(130,vh/2-bh/2);
-  const yb={year,c1:rC(),c2:rC(),bx,by,bw,bh};
+
+  // Reset scale for new year
+  tileScale=1.0; saveScale();
+
+  // Add year block (compact archive block visible on main screen)
+  const bw=100, bh=120;
+  const bx=vw-bw-18-years.length*(bw+10);
+  const by=Math.max(130,vh/2-bh/2);
+  const yb={year,c1:rC(),c2:rC(),bx,by,bw,bh,
+    origBx:bx,origBy:by,origBw:bw,origBh:bh};
   years.push(yb); await saveYears();
-  setTimeout(()=>$('canvas').appendChild(mkYearBlock(yb)), ms.length*14+650);
+
+  setTimeout(()=>cv.appendChild(mkYearBlock(yb)), ms.length*12+800);
 }
 
-// ── Year viewer ────────────────────────────────
-async function openYear(year){
-  const ms=mems.filter(m=>m.year===year);
-  $('yv-year').textContent=year;
-  $('yv-count').textContent=`${ms.length}\u00a0${pl(ms.length,'воспоминание','воспоминания','воспоминаний')}`;
-  const list=$('yv-list'); list.innerHTML='';
-  for(const m of ms){
-    const d=new Date(m.date);
-    const item=document.createElement('div'); item.className='yv-item';
-    item.innerHTML=`
-      <div class="yv-dot" style="background:${m.color}"></div>
-      <div class="yv-body">
-        <div class="yv-t">${m.text||'<em style="opacity:.4">фотография</em>'}</div>
-        <div class="yv-d">${d.toLocaleDateString('ru-RU',{day:'numeric',month:'long'})}</div>
-      </div>`;
-    if(m.hasPhoto){
-      const u=await loadPhoto(m.id);
-      if(u){const img=document.createElement('img');img.className='yv-thumb';img.src=u;img.alt='';item.appendChild(img);}
-    }
-    list.appendChild(item);
-  }
-  $('year-viewer').classList.add('active');
+// ── Year block (shows on main screen) ─────────
+function mkYearBlock(yb){
+  const el=document.createElement('div');
+  el.className='year-block'; el.dataset.year=yb.year;
+  el.style.cssText=`left:${yb.bx}px;top:${yb.by}px;width:${yb.bw}px;height:${yb.bh}px;background:linear-gradient(135deg,${yb.c1},${yb.c2});`;
+  el.innerHTML=`<div class="yl">архив</div><div class="yn">${yb.year}</div>`;
+  el.addEventListener('click',()=>openArchiveScreen(yb.year));
+  return el;
 }
-$('yv-close').addEventListener('click',()=>$('year-viewer').classList.remove('active'));
+
+// ── Archive second screen ─────────────────────
+async function openArchiveScreen(year){
+  const ms = mems.filter(m=>m.year===year);
+  viewerPool = ms;
+
+  const screen = $('archive-screen');
+  const mosaic = $('archive-mosaic');
+  const title  = $('archive-title');
+
+  title.textContent = year;
+  mosaic.innerHTML  = '';
+
+  // Build mini mosaic of that year's blocks
+  const vw=screen.offsetWidth||innerWidth;
+  const vh=screen.offsetHeight||innerHeight;
+  const blockTop=100;
+
+  ms.forEach(m=>{
+    const el=document.createElement('div');
+    el.className='archive-tile';
+    // Use stored orig positions but re-scale to fit screen
+    const sc=0.75;
+    el.style.cssText=`
+      left:${Math.round(m.origBx*sc)}px;
+      top:${Math.round(m.origBy*sc)+blockTop}px;
+      width:${Math.round(m.origBw*sc)}px;
+      height:${Math.round(m.origBh*sc)}px;
+      background:${m.color};
+    `;
+    // Tap = pulse; swipe to open random (handled above)
+    el.addEventListener('click',()=>{
+      el.classList.remove('pulsing'); void el.offsetWidth;
+      el.classList.add('pulsing');
+      el.addEventListener('animationend',()=>el.classList.remove('pulsing'),{once:true});
+    });
+    mosaic.appendChild(el);
+  });
+
+  screen.classList.add('active');
+}
+
+$('archive-close').addEventListener('click',()=>{
+  $('archive-screen').classList.remove('active');
+  viewerPool=null;
+});
+
+// ── Year viewer (list fallback) ────────────────
+async function openYear(year){ await openArchiveScreen(year); }
 
 function pl(n,a,b,c){const m=n%10,h=n%100;if(h>=11&&h<=19)return c;if(m===1)return a;if(m>=2&&m<=4)return b;return c;}
 
-// ── Keyboard ───────────────────────────────────
-document.addEventListener('keydown', e=>{
-  if(e.key==='Escape') ['overlay','viewer','year-viewer'].forEach(id=>$(id).classList.remove('active'));
+// ── Keyboard ──────────────────────────────────
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    ['overlay','viewer','archive-screen'].forEach(id=>$(id).classList.remove('active'));
+  }
+  // Y = force archive (debug)
   if(e.key==='y'||e.key==='Y'){
-    const y=yr(); if(years.find(x=>x.year===y))return;
-    const ms=mems.filter(m=>m.year===y&&m.on); if(ms.length)archiveYear(y,ms);
+    const ms=mems.filter(m=>m.on);
+    if(ms.length){ const y=new Date(ms[0].date).getFullYear(); archiveYear(y,ms); }
   }
 });
 
 if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 
 openDB().then(async()=>{
-  await loadState(); renderAll(); checkRollover();
+  await loadState(); renderAll(); checkAnniversary();
   if(mems.length>0) $('hint').style.opacity='0';
 });
 </script>
